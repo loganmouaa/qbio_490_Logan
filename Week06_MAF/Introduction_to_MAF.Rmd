@@ -19,23 +19,76 @@ In this assignment, you will need to use your skills learned in class to demonst
 Load all necessary packages, read in the clinical data.csv file you have in your analysis_data folder, and instantiate the MAF_object.
 ```{r}
 
+if (!require("knitr", quietly = TRUE))
+install.packages("knitr")
+if (!require("BiocManager", quietly = TRUE))
+install.packages("BiocManager")
+BiocManager::install(version = "3.21")
+if (!require("TCGAbiolinks", quietly = TRUE))
+BiocManager::install("TCGAbiolinks")
+if (!require("maftools", quietly = TRUE))
+BiocManager::install("maftools")
+
+library(BiocManager)
+library(TCGAbiolinks)
+library(maftools)
+
+clin_query <- GDCquery(project = "TCGA-BRCA",
+data.category = "Clinical",
+data.type = "Clinical Supplement",
+data.format = 'BCR Biotab')
+GDCdownload(clin_query)
+clinical.BCRtab.all <- GDCprepare(clin_query)
+clinic <- clinical.BCRtab.all$clinical_patient_brca[-c(1,2),]
+colnames(clinic)[ colnames(clinic) == "bcr_patient_barcode" ] <-
+"Tumor_Sample_Barcode"
+maf_query <- GDCquery(
+project = "TCGA-BRCA",
+data.category = "Simple Nucleotide Variation",
+access = "open",
+data.type = "Masked Somatic Mutation",
+workflow.type = "Aliquot Ensemble Somatic Variant Merging and Masking"
+)
+GDCdownload(maf_query, method = "api", files.per.chunk = 100)
+maf <- GDCprepare(maf_query)
+maf_object <- read.maf(maf = maf,
+clinicalData = clinic,
+isTCGA = TRUE)
 ```
 
 It's useful to save your MAF_object, so that you don't have to go through the trouble of querying and preparing it everytime. The saveRDS function allows us to save an R object, allowing us to access it directly from our files. 
 ```{r}
-saveRDS(fill in with name of your MAF_object, file = "/path/to/analysis_data/maf_object.rds")
-# ex. saveRDS(MAF_object, file = "/home1/erika/490_cluster/analysis_data/maf_object.rds")
+saveRDS(maf_object, file = "/home1/lmoua/490_cluster/analysis_data/maf_object.rds")
+# ex. saveRDS(MAF_object, file = "/home1/lmoua/490_cluster/analysis_data/maf_object.rds")
 ```
 
 When you reopen a new R session and want to access your MAF_object, you can use the readRDS function to load the object back into a new variable.
 ```{r}
-MAF_object <- readRDS(file = "/path/to/analysis_data/maf_object.rds")
+MAF_object <- readRDS(file = "/home1/lmoua/490_cluster/analysis_data/maf_object.rds")
 # ex. MAF_object <- readRDS(file = "/home1/erika/490_cluster/analysis_data/maf_object.rds")
 ```
 
 *1*
 Choose a clinical variable (or any variable from clin_rad or clin_drug) to separate your populations into two different groups and rewrite the column or create a new column with that variable as a factor. ***Do not use age or vital_status as your clinical variable.*** Hint: if your variable is continuous, you will need to determine your own cutoffs for the different levels of the factor. If your variable is categorical and has more than two possible values, choose the two that are the most common.
 ```{r}
+maf_clinical <- MAF_object@clinical.data
+str(maf_clinical)
+
+lymph_node_mask <- !is.na(maf_clinical$lymph_nodes_examined_count)
+maf_clinical <- maf_clinical[lymph_node_mask, ]
+
+high_mask <- maf_clinical$lymph_nodes_examined_count >= 10
+low_mask  <- maf_clinical$lymph_nodes_examined_count < 10
+
+high_mask <- !is.na(high_mask)
+low_mask <- !is.na(low_mask)
+
+maf_high <- maf_clinical[high_mask, ]
+maf_low  <- maf_clinical[low_mask, ]
+
+head(maf_high)
+head(maf_low)
+
 
 ```
 
@@ -43,7 +96,23 @@ Choose a clinical variable (or any variable from clin_rad or clin_drug) to separ
 *2*
 Create a co-oncoplot with the top 10-20 (you choose) most mutated genes for the two groups. Pick one that has a large discrepancy in % mutated or type of mutations between the groups and research it. 
 Research it. What is the gene used for? Can you think of any reason for the discrepancy?
+
+TP53 has a large discrepancy.
+The gene is known to regulate cell division and often used to prevent cancer. I think this discrepency stems from the fact that TP53 mutations are more common in aggressive tumors. This could correspond to patients with higher lymph node involvement
 ```{r}
+high_mask <- ifelse(maf_clinical$lymph_nodes_examined_count >= 10, T, F)
+low_mask  <- ifelse(maf_clinical$lymph_nodes_examined_count < 10, T, F)
+
+high_barcodes <- maf_clinical$Tumor_Sample_Barcode[high_mask]
+low_barcodes  <- maf_clinical$Tumor_Sample_Barcode[low_mask]
+
+high_maf <- subsetMaf(maf = MAF_object, tsb = high_barcodes)
+low_maf  <- subsetMaf(maf = MAF_object, tsb = low_barcodes)
+
+coOncoplot(
+  m1 = high_maf, m2 = low_maf,
+  m1Name = "lymph_nodes ≥ 10", m2Name = "lymph_nodes < 10"
+)
 
 ```
 
@@ -51,7 +120,27 @@ Research it. What is the gene used for? Can you think of any reason for the disc
 *3*
 Create a contingency table with your variable and chosen gene. Run a Fisher’s Exact Test between presence of mutations for that gene and your clinical variable. Create and save a mosaic plot. 
 Interpret the output of the Fisher’s Exact Test in terms of the odds ratio and p-value.
+
+The p-value, 0.67, indicates there is no statistically significant relationship between mutation presence and lymph node count. The odds ratio, 1.08, suggests that patients with high lymph node counts are about equally likely to have mutations as those with low lymph node counts.
 ```{r}
+lymph_node_mask <- !is.na(maf_clinical$lymph_nodes_examined_count)
+maf_clinical <- maf_clinical[lymph_node_mask, ]
+
+maf_clinical$Lymph_group <- ifelse(maf_clinical$lymph_nodes_examined_count >= 10,
+                                "High_Lymph_Nodes", "Low_Lymph_Nodes")
+
+tp53_mask <- ifelse(MAF_object@data$Hugo_Symbol == "TP53", T, F)
+tp53_barcodes <- MAF_object@data$Tumor_Sample_Barcode[tp53_mask]
+maf_clinical$TP53_mutation <- ifelse(maf_clinical$Tumor_Sample_Barcode %in% tp53_barcodes,
+                                     "Mutation", "No Mutation")
+
+contingency_table <- table(maf_clinical$Lymph_group, maf_clinical$TP53_mutation)
+contingency_table
+
+mosaicplot(contingency_table)
+
+fisher_result <- fisher.test(contingency_table)
+fisher_result
 
 ```
 
@@ -59,7 +148,16 @@ Interpret the output of the Fisher’s Exact Test in terms of the odds ratio and
 *4*
 Subset your maf_object based on your chosen clinical variable and create a co-lollipop plot of your chosen gene divided between the two different clinical variable possibilities. Include descriptive names on your plot.
 Do you notice any difference in terms of mutations (e.g. sites, types, number) between the two populations?
+
+They seem similar in almost every way, however, lymph_nodes that are less than 10 typically have missense mutations occur more often than those that have higher than 10
 ```{r}
+lollipopPlot2(
+  m1 = high_maf,
+  m2 = low_maf,
+  m1_name = "lymph_node ≥ 10",
+  m2_name = "lypmh_node < 10",
+  gene = "TP53"
+)
 
 ```
 
@@ -68,5 +166,6 @@ Do you notice any difference in terms of mutations (e.g. sites, types, number) b
 Create your Overall_Survival_Status column and create a mafSurvival KM plot based on mutations in your chosen gene.
 Does there seem to be a difference? Hypothesize why or not based on the other analysis you did with the gene above.
 ```{r}
+# Could not figure out this code correctly :(
 
 ```
