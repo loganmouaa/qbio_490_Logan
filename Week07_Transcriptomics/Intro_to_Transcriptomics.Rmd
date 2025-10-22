@@ -1,0 +1,161 @@
+---
+title: "Intro to Transcriptomics"
+author: Nicole Black, Wade Boohar, Kayla Xu
+date: 07/17/22
+updated: 10/18/24
+---
+
+***Deliverables***
+-Upload this R Notebook to your GitHub and submit the link to your Repo on Brightspace.
+-Include any graphs or figures created in this assignment in the folder with your R notebook with descriptive file names.
+
+Since this is an optional partner activity, it is okay if your answers are the same as your partner’s as long as everyone understands it and could explain it in their own words if asked. Each person must individually push their code to Github. *At the top of your R Notebook, write the name of you and your partner(s) as a comment.*
+
+***Complete the following coding activity and answer any following questions as comments in your R Notebook***
+
+In SummarizedExperiment Tutorial, you learned how to manipulate the SummarizedExperiment data structure and turn it into more readable dataframes, saving them as rna_counts, rna_clinical, and rna_genes. In this semi-guided assignment, you will use these dataframes to perform differential expression analysis based on tumor status.
+
+*Pre-Assignment*
+Use knitr function to set your working directory to your analysis_data folder in 490_cluster.
+```{r setup}
+ knitr::opts_knit$set(root.dir = normalizePath("/home1/lmoua/490_cluster/analysis_data"))
+```
+
+If DESeq2 is not already installed, install it now
+```{r}
+if (!require("DESeq2", quietly = TRUE))
+BiocManager::install("DESeq2")
+library(DESeq2)
+```
+
+Load in all necessary packages
+```{r}
+if (!require("knitr", quietly = TRUE))
+install.packages("knitr")
+if (!require("BiocManager", quietly = TRUE))
+install.packages("BiocManager")
+BiocManager::install(version = "3.21")
+if (!require("TCGAbiolinks", quietly = TRUE))
+BiocManager::install("TCGAbiolinks")
+if (!require("maftools", quietly = TRUE))
+BiocManager::install("maftools")
+
+library(SummarizedExperiment)
+
+library(BiocManager)
+library(TCGAbiolinks)
+library(maftools)
+
+clin_query <- GDCquery(project = "TCGA-BRCA",
+data.category = "Clinical",
+data.type = "Clinical Supplement",
+data.format = 'BCR Biotab')
+GDCdownload(clin_query)
+clinical.BCRtab.all <- GDCprepare(clin_query)
+clinic <- clinical.BCRtab.all$clinical_patient_brca[-c(1,2),]
+
+BiocManager::install("EnhancedVolcano")
+library(EnhancedVolcano)
+```
+
+
+
+*1*
+Read in the rna_clinical, rna_genes, and rna_counts dataframes which you made in the "SummarizedExperiment Guided Tutorial" R Notebook
+
+```{r}
+str(rna_clinical)
+str(rna_genes)
+str(rna_counts)
+
+```
+
+
+*2*
+In this assignment, you will run differential expression analysis comparing patient samples by whether the sample is from a tumor or normal tissue (this is the definition column in rna_clinical). You will need to choose a variable to control for covariance of: age and/or PAM50 subtype (paper_BRCA_Subtype_PAM50). 
+
+Manipulate those columns so that they are ready for differential expression analysis (hint: what kind of variables are they? what data type are they by default? do you need to handle unknown values?) Filter out genes with a total expression across all patients less than 1000.
+```{r}
+colnames(rna_clinical)
+
+rna_clinical <- as.data.frame(rna_se@colData) # clinical info
+rna_counts <- as.data.frame(rna_se@assays@data$unstranded) # gene count
+rna_genes <- as.data.frame(rna_se@rowRanges@elementMetadata) # 
+rownames(rna_genes) <- rna_genes$gene_id # match gene_id
+rownames(rna_counts) <- rna_genes$gene_id 
+colnames(rna_counts) <- rownames(rna_clinical)
+
+rna_clinical$definition[rna_clinical$definition=="Primary solid Tumor"] <- "Primary Tumor"
+rna_clinical$definition[rna_clinical$definition=="Solid Tissue Normal"] <- "Solid Tissue Normal"
+rna_clinical$definition <- factor(rna_clinical$definition)
+
+
+mask_def <- !is.na(rna_clinical$definition) #keep definition
+mask_age <- !is.na(rna_clinical$age_at_index) #keep age
+rna_clinical <- rna_clinical[mask_def & mask_age, ]
+
+# align samples with each other
+same_mask  <- colnames(rna_counts) %in% rownames(rna_clinical)
+rna_counts <- rna_counts[, same_mask]
+rna_clinical <- rna_clinical[colnames(rna_counts), ]
+
+keep_genes <- rowSums(rna_counts) >= 1000 # filter genes with >=1000
+rna_counts <- rna_counts[keep_genes, ]
+
+```
+
+*3*
+Perform the differential expression analysis, All you need to do is fill in the appropriate # terms
+```{r}
+dds <- DESeqDataSetFromMatrix(countData = rna_counts, 
+                              colData = rna_clinical, 
+                              design = ~ age_at_index + definition) # just doing age_at_index
+
+dds_obj <- DESeq(dds)
+
+resultsNames(dds_obj)
+
+results <- results(dds_obj, format = "DataFrame", contrast = c("definition", "Primary Tumor", "Solid Tissue Normal"))
+
+results <- data.frame(results)
+```
+
+Prepare results dataframe for EnhancedVolcano plotting. Add two columns, "-log10(padj)" and "gene_name". Fill in these columns appropriately.
+```{r}
+results <- as.data.frame(results) #change into dataframe to work with
+
+# remove rows with NA padj
+padj_ok_mask <- !is.na(results$padj)
+results <- results[padj_ok_mask, ]
+
+# Add labels
+results$gene_name <- rna_genes$gene_name[match(rownames(results), rna_genes$gene_id)]
+
+results$minus_log10_padj <- -log10(results$padj)
+
+```
+
+*4*
+Now we will use the EnhancedVolcano package to plot our results. The code is already completed and should run without adjustment if all code up to here is correct.
+```{r}
+EnhancedVolcano(results,
+                lab = results$gene_name,
+                x = 'log2FoldChange',
+                y = '-log10(padj)',
+                title = 'Sample Definition: Tumor vs Normal Tissue',
+                pointSize = 1.0,
+                labSize = 5.0)
+
+# unsure if I did everything correct (volcano plot was made but looks weird)
+```
+
+*5*
+# Explain what genes from each part of the Volcano Plot mean in terms of their significance and up/down regulation. 
+top-right genes: significant and up regulated
+bottom-right genes: non-significant and up regulated
+top-left genes: significant and down regulated 
+bottom-left genes: non-significant and down regulated
+top-middle genes: significantly and normally regulated
+bottom-middle genes: non-significant and normally regulated
+
+Save the picture of the volcano plot (using either ggsave() or right clicking and manually downloading the image and push this .Rmd and the image to GitHub)
