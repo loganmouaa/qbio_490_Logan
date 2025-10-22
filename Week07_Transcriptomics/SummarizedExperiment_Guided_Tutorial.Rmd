@@ -75,9 +75,9 @@ rownames(rna_se@rowRanges@elementMetadata)
 colnames(rna_se@rowRanges@elementMetadata)
 
 # what are the rows...?
-
+# the row are patients
 # unstranded: 
-# Hint: Do the rows/cols match dimensions of other dataframes?
+# Hint: Do the rows/cols match dimensions of other dataframes? yes
 
 ```
 
@@ -92,13 +92,13 @@ rna_se@colData$age_at_index[1:15]
 ```
 
 Call summary on the age_at_index column. Record the output below:
-    Min.: 
-    1st Qu.: 
-    Median: 
-    Mean: 
-    3rd Qu.: 
-    Max.: 
-    NA's: 
+    Min.: 26.00
+    1st Qu.: 48.00
+    Median: 58.00
+    Mean: 58.28
+    3rd Qu.: 67.00
+    Max.: 89.00
+    NA's: 1
     
 ```{r Exercise 2.2}
 # write code here
@@ -168,7 +168,7 @@ rna_genes <- as.data.frame(rna_genes)
 ###### (4) Assays
 
 What are the names of the 6 assays?
-
+# unstranded, stranded_first, stranded_second, tpm_unstrand, fpkm_unstranded, and fpkm_uq_unstrand
 ```{r Exercise 4.1}
 # access the assays here
 rna_se@assays@data
@@ -199,8 +199,8 @@ rna_counts[1:15, 1:5]
 Call rownames() and colnames() on rna_clinical.
 
 ```{r Exercise 5.1}
-
-
+rownames(rna_clinical)
+colnames(rna_clinical)
 ```
 
 Just like we did to "clinical", we are going to create a column in rna_clinical for age_category. Our cutoff will be "young" as <= 58 y/o, and "old" as > 58 y/o.
